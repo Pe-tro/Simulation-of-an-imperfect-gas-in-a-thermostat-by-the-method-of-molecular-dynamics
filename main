@@ -1,0 +1,604 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <iostream>
+#include <ctime>
+#include <random>
+#include <fstream>
+#include <iomanip>
+#define tab "\t"
+#define sep "\n---------------------------\n"
+#define end std::endl
+
+#define twoterm
+
+const double podgonka = 1;
+double deltap = 0;
+double deltat = 0;
+int chislo1 = 0, chislo2 = 0;
+int total = 0;
+int intime = 0;
+
+int L = 30;
+int N = 420;
+const double eps = 1.;
+const double sig = 1.;
+const double dt = 1e-3;
+
+
+double T = .1;
+const double Q = 0.1;
+const double QQ = 0.001;
+double ksi_1 = 0;
+double ksi_2 = 0;
+
+class Molecul
+{
+    private:
+    public:
+
+    double x[2], v[2], a[2];
+};
+void fill_a(Molecul *parts, double a[2], int j)
+{ 
+    a[0] = a[1] = 0;
+    for (int i = 0; i < N; ++i)
+    {
+        if (i == j) continue;
+        double dx[2] = { parts[j].x[0] - parts[i].x[0] , parts[j].x[1] - parts[i].x[1] };
+        for (int i = 0; i < 2;++i)
+        {
+            if (dx[i] > L / 2.) dx[i] -= L;
+            if (dx[i] < -L / 2.) dx[i] += L;
+        }
+        double s = (dx[0] * dx[0] + dx[1] * dx[1]) / sig / sig;
+        double s3 = s * s * s;
+        a[0] += 24. * eps * (2./s3/s3/s - 1./s3/s) * dx[0]/sig/sig;
+        a[1] += 24. * eps * (2./s3/s3/s - 1./s3/s) * dx[1] /sig/sig;
+        //std::cout << dx[0] << tab<< dx[1]<< std::endl;
+        if (sqrt(dx[0] * dx[0] + dx[1] * dx[1]) < 1.7 * sig) intime++;
+    }
+}
+void init(Molecul* parts)
+{
+    if (sig * sig * N * podgonka > L * L)
+    {
+        printf("Warning! SIG > d.\n");
+        exit(1);
+    }
+
+    //std::random_device rd;
+    //std::mt19937 gen(rd());
+    //std::uniform_real_distribution<> rnd;
+    std::mt19937 engine;
+    std::uniform_real_distribution<> rnd;
+    double v_[2] = { 0. };
+
+    int N1 = (int)(ceil(sqrt(N))+1);
+
+    parts[0].x[0] = (double)L / N1;
+    parts[0].x[1] = (double)L / N1; //1 +  1.5 *
+    v_[0] = parts[0].v[0] = (double)(rnd(engine) * 2 - 1);//rnd(gen)
+    v_[1] = parts[0].v[1] = (double)(rnd(engine) * 2 - 1);
+    for (int i = 1; i < N; ++i)
+    {
+        parts[i].x[0] = parts[i - 1].x[0] + (double)L /N1;
+        parts[i].x[1] = parts[i - 1].x[1];
+        if (parts[i].x[0] > (double)(L - (double)L / N1))
+        {
+            parts[i].x[0] = (double)L / N1;//1 + 
+            parts[i].x[1] = parts[i - 1].x[1]+ (double)L/ N1;
+        }
+        v_[0] += parts[i].v[0] = (double)(rnd(engine) * 2 - 1);
+        v_[1] += parts[i].v[1] = (double)(rnd(engine) * 2 - 1);
+    }
+    //for (int i = 0;i < N;++i) std::cout << parts[i].x[0] << tab << parts[i].x[1] << "\n";
+
+    v_[0] /= N;
+    v_[1] /= N;
+    for (int i = 0; i < N; ++i)
+    {
+        parts[i].v[0] -= v_[0];
+        parts[i].v[1] -= v_[1];
+        //if (i == 10) parts[i].v[0] = -20;
+    }
+    
+    for (int j = 0; j < N; j++) fill_a(parts ,parts[j].a, j);
+}
+
+double d, d2;
+const int diamperdist = 10;
+void initt(Molecul* parts)
+{
+    const int N1 = ceil(sqrt(N));
+    d = (double)L / N1 / diamperdist;
+    //printf("L = %d\td = %f\n", L, d);
+    d2 = d * d;
+
+    std::mt19937 engine;
+    std::uniform_real_distribution<> rnd;
+    double v_[2] = { 0. };
+
+    for (int i = 0; i < N; i++) {
+        int r = i % N1;
+        int c = i / N1;
+
+        parts[i].x[0] = (c + 0.5) * (double)L / N1;
+        parts[i].x[1] = (r + 0.5) * (double)L / N1;
+        // printf("%f\t%f\n", parts[i].x[0], parts[i].x[1]);
+
+        v_[0] += parts[i].v[0] = 1. * (rnd(engine) * 2 - 1);
+        v_[1] += parts[i].v[1] = 1. * (rnd(engine) * 2 - 1);
+    }
+
+    v_[0] /= N;
+    v_[1] /= N;
+
+    for (int i = 0; i < N; i++) {
+        parts[i].v[0] -= v_[0];
+        parts[i].v[1] -= v_[1];
+    }
+    for (int j = 0; j < N; j++) fill_a(parts, parts[j].a, j);
+}
+
+#ifdef twoterm
+void stepDH(Molecul* parts, double dt)
+{
+    ksi_2 += dt *(Q*ksi_1*ksi_1-T) / 4./QQ;
+
+    double dksi = 0;
+    for (int i = 0; i < N;++i) dksi += (parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1]);
+    dksi = (dksi - (2.*N-2.)* T) / Q;
+    ksi_1 += ( dksi  - ksi_1 * ksi_2 )*dt / 4.;
+
+    for (int i = 0; i < N;++i)
+    {
+        parts[i].v[0] -= dt * ksi_1 * parts[i].v[0]/2.;
+        parts[i].v[1] -= dt * ksi_1 * parts[i].v[1]/2.;
+    }
+
+    dksi = 0;
+    for (int i = 0; i < N;++i) dksi += (parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1]);
+    dksi = (dksi - (2. * N - 2.) * T) / Q;
+    ksi_1 += (dksi - ksi_1 * ksi_2) * dt / 4.;
+
+    ksi_2 += dt * (Q * ksi_1 * ksi_1 - T) / 4. / QQ;
+}
+#else 
+void stepDH(Molecul* parts, double dt)
+{
+    double dksi = 0;
+    for (int i = 0; i < N;++i) dksi += (parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1]);
+    dksi = (dksi - (2. * N - 2.) * T) / Q;
+    ksi_1 += dt * dksi / 4.;
+
+    for (int i = 0; i < N;++i)
+    {
+        parts[i].v[0] -= dt * ksi * parts[i].v[0] / 2.;
+        parts[i].v[1] -= dt * ksi * parts[i].v[1] / 2.;
+    }
+
+    dksi = 0;
+    for (int i = 0; i < N;++i) dksi += (parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1]);
+    dksi = (dksi - (2. * N - 2.) * T) / Q;
+    ksi_1 += dt * dksi / 4.;
+}
+#endif
+void dostep(double dt, Molecul* parts,int i,int n)
+{
+    stepDH(parts, dt);
+
+    double a1[2];
+
+    for (int j = 0; j < N;++j)
+    {
+        parts[j].x[0] += parts[j].v[0] * dt + parts[j].a[0] * dt * dt / 2;
+        parts[j].x[1] += parts[j].v[1] * dt + parts[j].a[1] * dt * dt / 2;
+
+        if (parts[j].x[0] < 0) parts[j].x[0] += L;
+        if (parts[j].x[0] > L) parts[j].x[0] -= L;
+        if (parts[j].x[1] < 0) parts[j].x[1] += L;
+        if (parts[j].x[1] > L) parts[j].x[1] -= L;
+    }
+    intime = 0;
+    for (int j = 0; j < N; ++j)
+    {
+        fill_a(parts, a1, j);
+        parts[j].v[0] += (parts[j].a[0] + a1[0]) * dt / 2;
+        parts[j].v[1] += (parts[j].a[1] + a1[1]) * dt / 2;
+        parts[j].a[0] = a1[0];
+        parts[j].a[1] = a1[1];
+
+        //if (parts[j].x[0] < 0)
+        //{
+        //    parts[j].x[0] += L;
+        //    chislo1++;
+        //    if ((i >= (int)(7 * n / 8))) //&& (parts[j].v[0] < 0)
+        //    {
+        //        deltap -= parts[j].v[0];
+        //        chislo2++;
+        //    }
+        //}
+    }
+    total += (double) (intime / (N*(N-1)));
+    stepDH(parts, dt);
+}
+
+double E(Molecul* parts)
+{
+    double ans = 0;
+    for (int i = 0; i < N;++i)
+    {
+        double v2 = parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1];
+        double pot = 0;
+        for (int j = i + 1; j < N;++j)
+        {
+            double dx[2] = { parts[j].x[0] - parts[i].x[0] , parts[j].x[1] - parts[i].x[1] };
+            for (int i = 0; i < 2;++i)
+            {
+                if (dx[i] > L / 2.) dx[i] -= L;
+                if (dx[i] < -L / 2.) dx[i] += L;
+            }
+            double s = (dx[0] * dx[0] + dx[1] * dx[1]) / sig / sig;
+            double s3 = s * s * s;
+            //std::cout<< s<< tab;
+            pot += 4 * eps * (1 / s3 / s3 - 1 / s3);
+        }
+        ans += v2 / 2. + pot;
+    }
+    return ans;
+}
+double Temp(Molecul* parts)
+{
+    double T = 0;
+    for (int i = 0; i < N;++i) T += (parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1]) / (2. * N - 2);
+    return T;
+}
+void MergeSort(double* parts, int size)
+{
+    int blockSize = 1, p;
+    double* a, * b;
+    double* c = new double[size];
+    do
+    {
+        for (int k = 0; k < size; k += (blockSize * 2))
+        {
+            a = &parts[k];
+            b = &parts[k + blockSize];
+            p = 0;
+            for (int i = 0, j = 0; i < blockSize || j < blockSize;)
+            {
+                if ((j < blockSize) && ((k + j + blockSize) >= size))
+                {
+                    ++j;
+                }
+                else if ((i < blockSize) && ((k + i) >= size))
+                {
+                    ++i;
+                }
+                else if (i >= blockSize)
+                {
+                    c[p++] = b[j++];
+                }
+                else if (j >= blockSize)
+                {
+                    c[p++] = a[i++];
+                }
+                else if (a[i] >= b[j])
+                {
+                    c[p++] = b[j++];
+                }
+                else if (a[i] < b[j])
+                {
+                    c[p++] = a[i++];
+                }
+            }
+            for (int i = 0; i < p; i++)
+            {
+                a[i] = c[i];
+            }
+        }
+        blockSize *= 2;
+    } while (blockSize < size);
+}
+
+const int Nbins = 15;
+const double binh = 0.1;
+void safeHist(Molecul* parts, std::ofstream& out)
+{
+    int hist[Nbins] = { 0 }, j = 0;
+    double vv[100], dl = 0, dll = 0;
+
+    for (int j = 0; j < N;++j) { vv[j] = sqrt(parts[j].v[0] * parts[j].v[0] + parts[j].v[1] * parts[j].v[1]); }
+    MergeSort(vv, N);
+    //for (int j = 0; j < N;++j) { std::cout << vv[j]<<std::endl; }
+    //std::cout << sep;
+    dl = vv[N - 1] / Nbins;
+    dll = dl;
+
+    for (int i = 0; i < N;++i)
+    {
+        if (vv[i] <= dll) hist[j]++;
+        else
+        {
+            //std::cout << dll<<sep;
+            j++;
+            hist[j]++;
+            dll += dl;
+        }
+    }
+    for (int i = 0;i < Nbins;++i)
+    {
+        out << i + 1 << tab << hist[i] << std::endl;
+    }
+    out << sep;
+}
+void safeHistTwo(Molecul* parts, std::ofstream& outfile, int i, int n, int& s, int q) // s -- количество гистограмм q--шаг
+{
+    if (i >= (int)(7 * n / 8) && i % q == 0 && s > 0)
+    {
+        s--;
+        safeHist(parts, outfile);
+    }
+}
+void ten_persent(Molecul* parts, std::ofstream& outfile1, std::ofstream& outfile2, double t)
+{
+    double vv[100];
+    for (int j = 0; j < N;++j) { vv[j] = sqrt(parts[j].v[0] * parts[j].v[0] + parts[j].v[1] * parts[j].v[1]); }
+    //MergeSort(vv, N);
+    double max = sqrt(T);
+    int nlow = 0, nhigh = 0;
+
+    for (int i = 0; i < N;++i)
+    {
+        if (vv[i] > (max * 1.4)) nhigh++;
+        else if (vv[i] < (max * 0.6)) nlow++;
+    }
+    outfile1 << t << tab << nlow << std::endl;
+    outfile2 << t << tab << nhigh << std::endl;
+}
+
+
+double p1(Molecul* parts)
+{   
+    double f[2] = {0.};
+
+    double ans = 0;
+    for (int i = 0; i < N;++i)
+    {
+        double v2 = parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1];
+        ans += v2;
+    }
+    ans /= (2 * N - 2);
+    
+
+    for (int j = 0; j < N; ++j)
+    {
+        for (int i = 0;i < N;++i)
+        {
+            if (j >= i) continue;
+            double dx[2] = { parts[j].x[0] - parts[i].x[0] , parts[j].x[1] - parts[i].x[1] };
+
+            for (int i = 0; i < 2;++i)
+            {
+                if (dx[i] > L / 2.) dx[i] -= L;
+                if (dx[i] < -L / 2.) dx[i] += L;
+            }
+
+            double s = (dx[0] * dx[0] + dx[1] * dx[1]) / sig / sig;
+            double s3 = s * s * s;
+            f[0] += dx[0] * 24. * eps * (2. / s3 / s3 / s - 1. / s3 / s) * dx[0] / sig / sig;
+            f[1] += dx[1] * 24. * eps * (2. / s3 / s3 / s - 1. / s3 / s) * dx[1] / sig / sig;
+            //std::cout << dx[0] << tab<< dx[1]<< std::endl;
+        }
+    }
+    return ((N * ans + 0.5 * (f[0] + f[1])) / L / L);
+}
+double p2(Molecul* parts)
+{
+    double f[2] = { 0. };
+
+    double ans = 0;
+    for (int i = 0; i < N;++i)
+    {
+        double v2 = parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1];
+        ans += v2;
+    }
+    ans /= (2 * N - 2);
+
+
+    for (int j = 0; j < N; ++j)
+    {
+        for (int i = 0;i < j;++i)
+        {
+            //if (j >= i) continue;
+            double dx[2] = { parts[j].x[0] - parts[i].x[0] , parts[j].x[1] - parts[i].x[1] };
+
+            for (int k = 0; k < 2;++k)
+            {
+                if (dx[k] > L / 2.) dx[k] -= L;
+                if (dx[k] < -L / 2.) dx[k] += L;
+            }
+
+            double s = (dx[0] * dx[0] + dx[1] * dx[1]) / sig / sig;
+            double s3 = s * s * s;
+            f[0] += parts[j].x[0] * 24. * eps * (2. / s3 / s3 / s - 1. / s3 / s) * dx[0] / sig / sig;
+            f[1] += parts[j].x[0] * 24. * eps * (2. / s3 / s3 / s - 1. / s3 / s) * dx[1] / sig / sig;
+            //std::cout << dx[0] << tab<< dx[1]<< std::endl;
+        }
+    }
+    return ((N * ans + 0.5 * (f[0] + f[1])) / L / L);
+    /*double f[2] = { 0. };
+
+    double ans = 0;
+    for (int i = 0; i < N;++i)
+    {
+        double v2 = parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1];
+        ans += v2;
+    }
+    ans /= (2 * N - 2);
+
+    for (int j = 0; j < N; ++j)
+    {
+        f[0] += parts[j].a[0] * parts[j].x[0];
+        f[1] += parts[j].a[1] * parts[j].x[1];
+    }
+    return ((N * ans + 0.5 * (f[0] + f[1])) / L / L);*/
+}
+
+
+double p3(Molecul* parts)
+{
+    double p = 0;
+    for (int j = 0; j < N;++j)
+    {
+        p += parts[j].v[0] * parts[j].v[0] + parts[j].v[1] * parts[j].v[1];
+    }
+    p = p/L/L/2;
+    return p;
+}
+double p4(Molecul* parts)
+{
+    double O = 0.; 
+    double ans = 0.;
+    for (int i = 0;i < N;++i)
+    {
+        ans += parts[i].a[0] * parts[i].x[0] + parts[i].a[1] * parts[i].x[1];
+        O += (parts[i].v[0] * parts[i].v[0] + parts[i].v[1] * parts[i].v[1]) / (2. * N - 2);
+    }
+    ans = N * O + ans / 2.;
+    return ans / L / L;
+}
+double p_stenki(Molecul* parts, double dt)
+{
+    double ans = 0.;
+    const int R = 100;
+    for (int r = 0;r < R;++r)
+    {
+        const double xsep = (r + 1) * (double) L / R;
+        for (int i = 0;i < N;++i)
+        {
+            if (parts[i].v[0] > 0.)
+            {
+                double xleft = xsep - parts[i].v[0] * dt;
+                if (parts[i].x[0] >= xleft && parts[i].x[0] <= xsep)
+                    ans += parts[i].v[0];
+                //std::cout << ans;
+            }
+        }
+    }
+    for (int r = 0;r < R;++r)
+    {
+        const double xsep = (r + 1) * (double)L / R;
+        for (int i = 0;i < N;++i)
+        {
+            if (parts[i].v[1] > 0.)
+            {
+                double xleft = xsep - parts[i].v[1] * dt;
+                if (parts[i].x[1] >= xleft && parts[i].x[1] <= xsep)
+                    ans += parts[i].v[1];
+                //std::cout << ans;
+            }
+        }
+    }
+    return 2. * ans / dt / R / L/2;
+}
+
+double safep(double* p, int  l, double* s)
+{
+    double P = 0;
+    for (int i = 0; i < l;++i)
+    {
+        P += p[i];
+    }
+    P /= l;
+    *s = 0;
+    for (int i = 0;i < l;++i)
+    {
+        *s += (P - p[i]) * (P - p[i]);
+    }
+
+    *s = sqrt(*s / (l * (l - 1)));
+
+    return P;
+}
+void files(char** V, int N)
+{
+    for (int i = 0; i < N;++i)
+    {
+        V[i] = new char[20];
+        sprintf(V[i], "Vnew%d.txt", i);
+    }
+}
+
+int main()
+{
+    /*std::ofstream outfile("hist.txt", std::ios::out | std::ios::trunc);
+    if (!outfile) { std::cerr << "error" << std::endl; return 1; }
+    std::ofstream outFile("E.txt", std::ios::out | std::ios::trunc);
+    if (!outFile) {std::cerr << "error" << std::endl; return 1;}
+    std::ofstream out("vv.txt", std::ios::out | std::ios::trunc);
+    if (!out) { std::cerr << "error" << std::endl; return 1; }
+    std::ofstream outfile1("vlow.txt", std::ios::out | std::ios::trunc);
+    if (!outfile1) { std::cerr << "error" << std::endl; return 1; }
+    std::ofstream outfile2("vhigh.txt", std::ios::out | std::ios::trunc);
+    if (!outfile2) { std::cerr << "error" << std::endl; return 1; }*/
+
+    std::ofstream ou1("1p_3T.txt", std::ios::out | std::ios::trunc);
+    if (!ou1) { std::cerr << "error" << std::endl; return 1; }
+    std::ofstream ou2("1pstenki_T.txt", std::ios::out | std::ios::trunc);
+    if (!ou2) { std::cerr << "error" << std::endl; return 1; }
+    std::ofstream ou3("1p_4T.txt", std::ios::out | std::ios::trunc);
+    if (!ou3) { std::cerr << "error" << std::endl; return 1; }
+
+    const int n = 31000;
+    double t = 0;
+    int s = 5, ll = 0;
+    const int  l = 200;
+    double P1[l] = { 0. };
+    double P2[l] = { 0. };
+    double P3[l] = { 0. };
+    //double p1 = 0,p2=0, vsr=0;
+
+    for (int j = 0; j <15; ++j)
+    {
+        ll = 0;
+        const int NN = N;
+        Molecul* parts = new Molecul[NN];
+        initt(parts);
+        for (int i = 0;i < N;++i)std::cout << parts[i].x[0] << tab << parts[i].x[1] << end;
+        std::cout << sep;
+        //Molecul parts[NN]; init(parts);
+
+        for (int i = 0; i < n;++i)
+        {
+            if (i >= (int)(10000) && i % 100== 0 && ll < l)   //std::cout << p_stenki(parts, dt)<<end;
+            {
+                P1[ll] = p3(parts);
+                P2[ll] = p_stenki(parts, dt);
+                P3[ll] = p4(parts);
+                //std::cout<< parts[0].v[0] << tab << p_stenki(parts, dt)<<end;
+                ll++;
+            }
+            dostep(dt, parts, i, n);
+            //t += dt;
+        }
+        double sigma;
+        ou1 << std::fixed << std::setprecision(10) << (double)N / L / L << tab << safep(P1, l, &sigma); //(double)N / L / L
+        ou1 << tab << sigma << std::endl;
+        ou2 << std::fixed << std::setprecision(10) << (double)N / L / L << tab << safep(P2, l, &sigma);
+        ou2 << tab << sigma << std::endl;
+        ou3 << std::fixed << std::setprecision(10) << (double)N / L / L << tab << safep(P3, l, &sigma);
+        ou3 << tab << sigma << std::endl;
+        
+        N += 15;
+        delete[] parts;
+        //T += 0.1;
+    }
+    /*out.close();*/
+    ou1.close();
+    ou2.close();
+    ou3.close();
+    /* outFile.close();
+     outfile.close();
+     outfile2.close();
+     outfile1.close();*/
+}
